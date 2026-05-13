@@ -120,16 +120,16 @@ const KINSHIP_DB = (() => {
     { term: '堂伯父', alias: ['堂伯'], path: [F, up('祖父','M'), up('曾祖父','M'), down('伯祖父','M','elder'), down('堂伯父','M','elder')], type: 'blood-collateral' },
     { term: '堂叔父', alias: ['堂叔'], path: [F, up('祖父','M'), up('曾祖父','M'), down('叔祖父','M','younger'), down('堂叔父','M','younger')], type: 'blood-collateral' },
     { term: '堂姑', alias: ['堂姑母','堂姑姑'], path: [F, up('祖父','M'), up('曾祖父','M'), down('叔祖父','M','younger'), down('堂姑','F')], type: 'blood-collateral' },
-    // 表舅/表姨（母親的表兄弟姊妹）
-    { term: '表舅', alias: ['表舅舅'], path: [M, up('外祖父','M'), up('外曾祖父','M'), down('舅祖父','M'), down('表舅','M')], type: 'blood-collateral' },
-    { term: '表姨', alias: ['表阿姨','表姨母'], path: [M, up('外祖母','F'), up('外曾祖母','F'), down('姨祖母','F'), down('表姨','F')], type: 'blood-collateral' },
+    // 表舅/表姨（母親的表兄弟姊妹 = 外祖父的姊妹（姑婆）之子女）
+    { term: '表舅', alias: ['表舅舅'], path: [M, up('外祖父','M'), up('外曾祖父','M'), down('姑婆','F'), down('表舅','M')], type: 'blood-collateral' },
+    { term: '表姨', alias: ['表阿姨','表姨母'], path: [M, up('外祖父','M'), up('外曾祖父','M'), down('姑婆','F'), down('表姨','F')], type: 'blood-collateral' },
 
     // 從堂兄弟（祖父的兄弟的孫）=> 6親等
     { term: '從堂兄', alias: [], path: [F, up('祖父','M'), up('曾祖父','M'), down('伯祖父','M','elder'), down('堂伯父','M','elder'), down('從堂兄','M','elder')], type: 'blood-collateral' },
     { term: '從堂弟', alias: [], path: [F, up('祖父','M'), up('曾祖父','M'), down('叔祖父','M','younger'), down('堂叔父','M','younger'), down('從堂弟','M','younger')], type: 'blood-collateral' },
 
-    // 表舅公 = 外祖父的表兄弟 = 外曾祖父的姊妹之子
-    { term: '表舅公', alias: ['表舅祖父'], path: [M, up('外祖父','M'), up('外曾祖父','M'), down('姑外曾祖母','F'), down('表舅公','M')], type: 'blood-collateral' },
+    // 表舅公 = 外祖父的表兄弟 = 外曾祖父的姊妹（姑太婆）之子，共同祖先為外高祖父
+    { term: '表舅公', alias: ['表舅祖父'], path: [M, up('外祖父','M'), up('外曾祖父','M'), up('外高祖父','M'), down('姑太婆','F'), down('表舅公','M')], type: 'blood-collateral' },
 
     // ==================== 姻親 ====================
     // -- 配偶 --

@@ -1,21 +1,3 @@
-// ====== 初始化 Mermaid ======
-mermaid.initialize({
-  startOnLoad: false,
-  theme: 'base',
-  themeVariables: {
-    primaryColor: '#eef2ff',
-    primaryBorderColor: '#6366f1',
-    primaryTextColor: '#1e293b',
-    lineColor: '#6366f1',
-    fontSize: '14px',
-  },
-  flowchart: {
-    useMaxWidth: true,
-    htmlLabels: true,
-    curve: 'basis',
-  },
-});
-
 // ====== DOM 元素 ======
 const inputEl = document.getElementById('kinship-input');
 const calcBtn = document.getElementById('calc-btn');
@@ -229,160 +211,197 @@ function buildLawText(deg) {
   }
 }
 
-// ====== Mermaid 圖表渲染 ======
-let mermaidCounter = 0;
+// ====== HTML 樹狀圖渲染 ======
+function renderMermaid(entry, deg) {
+  const container = mermaidContainer;
+  container.innerHTML = '';
+  const path = entry.path;
 
-async function renderMermaid(entry, deg) {
-  const code = buildMermaidCode(entry, deg);
-  mermaidContainer.innerHTML = '';
+  // 分析路徑：找出上行段、下行段、配偶段
+  const upNodes = [];   // 己身側往上的節點（不含己身）
+  const downNodes = []; // 共同祖先往下到目標的節點
+  let spouseNode = null;
+  let spouseAttachIdx = -1; // spouse 接在哪個 down 節點後
 
-  mermaidCounter++;
-  const id = `mermaid-graph-${mermaidCounter}`;
+  let phase = 'up';
+  for (let i = 0; i < path.length; i++) {
+    const n = path[i];
+    if (n.step === 'up') {
+      upNodes.push(n);
+    } else if (n.step === 'down') {
+      phase = 'down';
+      downNodes.push(n);
+    } else if (n.step === 'spouse') {
+      spouseNode = n;
+      spouseAttachIdx = downNodes.length - 1;
+    }
+  }
 
-  try {
-    const { svg } = await mermaid.render(id, code);
-    mermaidContainer.innerHTML = svg;
-  } catch (e) {
-    console.error('Mermaid render error:', e);
-    mermaidContainer.innerHTML = `<pre style="color:red">圖表渲染失敗: ${escapeHtml(e.message)}</pre>`;
+  const isCollateral = upNodes.length > 0 && downNodes.length > 0;
+  const isDirect = !isCollateral && !spouseNode;
+  const wrapper = el('div', 'tree-wrapper');
+
+  if (isCollateral) {
+    renderCollateralTree(wrapper, upNodes, downNodes, spouseNode, spouseAttachIdx, deg);
+  } else if (spouseNode && upNodes.length === 0 && downNodes.length === 0) {
+    // 純配偶
+    renderDirectTree(wrapper, path, deg);
+  } else {
+    renderDirectTree(wrapper, path, deg);
+  }
+
+  container.appendChild(wrapper);
+}
+
+function renderCollateralTree(wrapper, upNodes, downNodes, spouseNode, spouseAttachIdx, deg) {
+  // 共同祖先 = upNodes 最後一個
+  const ancestor = upNodes[upNodes.length - 1];
+
+  // 共同祖先節點（編號 = upCount，代表從己身數上來的第幾步）
+  const ancestorNode = makeNode(ancestor.label, 'node-ancestor', deg.upCount, '共同祖先');
+  wrapper.appendChild(ancestorNode);
+  wrapper.appendChild(el('div', 'tree-vline'));
+
+  // 分支容器
+  const branches = el('div', 'tree-branches');
+
+  // 左支：旁系（目標側）
+  const leftBranch = el('div', 'tree-branch');
+  const leftLabel = el('div', 'tree-branch-label');
+  leftLabel.textContent = '▼ 旁系';
+  leftBranch.appendChild(leftLabel);
+
+  let num = deg.upCount + 1; // 從共同祖先之後繼續編號
+  for (let i = 0; i < downNodes.length; i++) {
+    const n = downNodes[i];
+    const isLast = (i === downNodes.length - 1) && !spouseNode;
+    const cls = isLast ? 'node-target' : '';
+    const nodeEl = makeNode(n.label, cls, num, null);
+    leftBranch.appendChild(nodeEl);
+    num++;
+
+    // 如果有配偶接在這個節點
+    if (spouseNode && i === spouseAttachIdx) {
+      const row = el('div', 'tree-spouse-row');
+      row.appendChild(el('div', 'tree-spouse-hline'));
+      const sp = makeNode(spouseNode.label, 'node-target', null, '配偶');
+      row.appendChild(sp);
+      leftBranch.appendChild(row);
+    }
+
+    if (i < downNodes.length - 1) {
+      leftBranch.appendChild(el('div', 'tree-vline'));
+    }
+  }
+
+  // 右支：直系（己身側）- 從祖先往下列到己身
+  const rightBranch = el('div', 'tree-branch');
+  const rightLabel = el('div', 'tree-branch-label');
+  rightLabel.textContent = '▼ 直系';
+  rightBranch.appendChild(rightLabel);
+
+  // upNodes 是 [父, 祖父, 曾祖父...]，反轉後去掉最後一個(共同祖先) 得到從上往下
+  const selfSide = upNodes.slice(0, -1).reverse();
+  let selfNum = selfSide.length; // 最靠近共同祖先的編號最大，靠近己身的=1
+  for (let i = 0; i < selfSide.length; i++) {
+    const n = selfSide[i];
+    const nodeEl = makeNode(n.label, '', selfNum, null);
+    rightBranch.appendChild(nodeEl);
+    selfNum--;
+    rightBranch.appendChild(el('div', 'tree-vline'));
+  }
+  // 己身
+  rightBranch.appendChild(makeNode('己身', 'node-self', null, null));
+
+  branches.appendChild(leftBranch);
+  branches.appendChild(rightBranch);
+  wrapper.appendChild(branches);
+
+  // 總結
+  const summary = el('div', 'tree-summary');
+  summary.textContent = `上數 ${deg.upCount} 世 + 下數 ${deg.downCount} 世 = ${deg.degree} 親等`;
+  wrapper.appendChild(summary);
+}
+
+function renderDirectTree(wrapper, path, deg) {
+  const direct = el('div', 'tree-direct');
+  let num = 0;
+
+  // 直系：由上往下排列
+  // 尊親屬(全up)：反轉 → 目標在上，己在下
+  // 卑親屬(全down)：己在上，目標在下
+  const allUp = path.every(n => n.step === 'up');
+  const allDown = path.every(n => n.step === 'down' || n.step === 'spouse');
+  const hasSpouse = path.some(n => n.step === 'spouse');
+
+  if (allUp) {
+    // 尊親屬：最上面是目標
+    const reversed = [...path].reverse();
+    const targetNode = makeNode(reversed[0].label, 'node-target', path.length, null);
+    direct.appendChild(targetNode);
+
+    for (let i = 1; i < reversed.length; i++) {
+      direct.appendChild(el('div', 'tree-vline'));
+      const nodeEl = makeNode(reversed[i].label, '', path.length - i, null);
+      direct.appendChild(nodeEl);
+    }
+    direct.appendChild(el('div', 'tree-vline'));
+    direct.appendChild(makeNode('己身', 'node-self', null, null));
+  } else {
+    // 卑親屬或含配偶
+    direct.appendChild(makeNode('己身', 'node-self', null, null));
+    num = 1;
+    for (let i = 0; i < path.length; i++) {
+      const n = path[i];
+      if (n.step === 'spouse') {
+        // 配偶用橫向
+        const row = el('div', 'tree-spouse-row');
+        const prev = direct.lastElementChild;
+        row.appendChild(el('div', 'tree-spouse-hline'));
+        const isLast = i === path.length - 1;
+        const cls = isLast ? 'node-target' : 'node-spouse';
+        row.appendChild(makeNode(n.label, cls, null, '配偶'));
+        direct.appendChild(row);
+      } else {
+        direct.appendChild(el('div', 'tree-vline'));
+        const isLast = i === path.length - 1;
+        const cls = isLast ? 'node-target' : '';
+        direct.appendChild(makeNode(n.label, cls, num, null));
+        num++;
+      }
+    }
+  }
+
+  wrapper.appendChild(direct);
+
+  if (deg.type !== 'spouse') {
+    const summary = el('div', 'tree-summary');
+    summary.textContent = `共 ${deg.degree} 世 = ${deg.degree} 親等`;
+    wrapper.appendChild(summary);
   }
 }
 
-function buildMermaidCode(entry, deg) {
-  const path = entry.path;
-  const lines = ['graph TB'];
-  const nodeIds = [];
-  const nodeLabels = [];
-  const nodeTypes = []; // 'self', 'ancestor', 'target', 'middle', 'spouse'
-
-  // 建立節點
-  // 第一個節點是己身
-  nodeIds.push('N_self');
-  nodeLabels.push('己身');
-  nodeTypes.push('self');
-
-  // 追蹤路徑建構節點
-  let currentUpCount = 0;
-  let currentDownCount = 0;
-  let phase = 'up';
-  let ancestorIndex = -1;
-
-  for (let i = 0; i < path.length; i++) {
-    const node = path[i];
-    const nodeId = `N_${i}`;
-    nodeIds.push(nodeId);
-    nodeLabels.push(node.label);
-
-    if (node.step === 'up') {
-      currentUpCount++;
-      nodeTypes.push('ancestor');
-      // 追蹤最高祖先
-      ancestorIndex = nodeIds.length - 1;
-    } else if (node.step === 'down') {
-      if (phase === 'up') phase = 'down';
-      currentDownCount++;
-      if (i === path.length - 1) {
-        nodeTypes.push('target');
-      } else {
-        nodeTypes.push('middle');
-      }
-    } else if (node.step === 'spouse') {
-      nodeTypes.push('spouse');
-    }
+// 建立節點 DOM
+function makeNode(label, extraClass, num, subtitle) {
+  const node = el('div', 'tree-node ' + (extraClass || ''));
+  node.textContent = label;
+  if (num != null) {
+    const badge = el('span', 'node-num');
+    badge.textContent = num;
+    node.appendChild(badge);
   }
-
-  // 如果最後一個節點是配偶（例如嫂嫂），標記前一個也特殊處理
-  if (path.length > 0 && path[path.length - 1].step === 'spouse') {
-    // 目標是最後的 spouse 節點
-    nodeTypes[nodeTypes.length - 1] = 'target';
+  if (subtitle) {
+    const sub = el('span', 'node-sub');
+    sub.textContent = subtitle;
+    node.appendChild(sub);
   }
+  return node;
+}
 
-  // 如果整個路徑都是 up（直系尊親屬），最後一個是 target
-  if (path.every(n => n.step === 'up')) {
-    nodeTypes[nodeTypes.length - 1] = 'target';
-  }
-
-  // 如果整個路徑都是 down（直系卑親屬），最後一個是 target
-  if (path.every(n => n.step === 'down')) {
-    nodeTypes[nodeTypes.length - 1] = 'target';
-  }
-
-  // 判斷共同祖先（旁系血親用）
-  let commonAncestorIdx = -1;
-  if (deg.type === 'blood-collateral') {
-    // 找最後一個 'up' 節點
-    for (let i = path.length - 1; i >= 0; i--) {
-      if (path[i].step === 'up') {
-        commonAncestorIdx = i + 1; // +1 因為 nodeIds 比 path 多一個 self
-        break;
-      }
-    }
-  }
-
-  // 寫節點定義
-  for (let i = 0; i < nodeIds.length; i++) {
-    const id = nodeIds[i];
-    const label = nodeLabels[i];
-    let shape;
-
-    if (nodeTypes[i] === 'self') {
-      shape = `${id}["🧑 ${label}"]`;
-    } else if (nodeTypes[i] === 'target') {
-      shape = `${id}["🎯 ${label}"]`;
-    } else if (i === commonAncestorIdx) {
-      shape = `${id}["👑 ${label}<br/><small>共同祖先</small>"]`;
-      nodeTypes[i] = 'common-ancestor';
-    } else if (nodeTypes[i] === 'spouse') {
-      shape = `${id}["💍 ${label}"]`;
-    } else {
-      shape = `${id}["${label}"]`;
-    }
-    lines.push(`  ${shape}`);
-  }
-
-  // 寫連線
-  for (let i = 0; i < nodeIds.length - 1; i++) {
-    const from = nodeIds[i];
-    const to = nodeIds[i + 1];
-    const node = path[i]; // path[i] 對應 nodeIds[i+1]
-
-    let edgeLabel;
-    if (node.step === 'up') {
-      edgeLabel = '上1世';
-    } else if (node.step === 'down') {
-      edgeLabel = '下1世';
-    } else if (node.step === 'spouse') {
-      edgeLabel = '配偶';
-    }
-    lines.push(`  ${from} -->|"${edgeLabel}"| ${to}`);
-  }
-
-  // 套用樣式
-  for (let i = 0; i < nodeIds.length; i++) {
-    const id = nodeIds[i];
-    switch (nodeTypes[i]) {
-      case 'self':
-        lines.push(`  style ${id} fill:#d1fae5,stroke:#059669,stroke-width:3px,color:#064e3b`);
-        break;
-      case 'target':
-        lines.push(`  style ${id} fill:#fce7f3,stroke:#db2777,stroke-width:3px,color:#831843`);
-        break;
-      case 'common-ancestor':
-        lines.push(`  style ${id} fill:#fef3c7,stroke:#d97706,stroke-width:3px,color:#78350f`);
-        break;
-      case 'spouse':
-        lines.push(`  style ${id} fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#4c1d95`);
-        break;
-      case 'ancestor':
-        lines.push(`  style ${id} fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0c4a6e`);
-        break;
-      default:
-        lines.push(`  style ${id} fill:#f1f5f9,stroke:#64748b,stroke-width:1px,color:#334155`);
-        break;
-    }
-  }
-
-  return lines.join('\n');
+function el(tag, className) {
+  const e = document.createElement(tag);
+  if (className) e.className = className;
+  return e;
 }
 
 // ====== 常見稱謂標籤 ======
